@@ -1,0 +1,68 @@
+#!/bin/bash
+# Headless launcher for AP2 v1 / human-present / cards flow.
+# Replaces `adk web` (browser UI) with `adk api_server` (REST, no UI).
+# The v1 shopping_agent is driven via the ADK REST API (/run_sse) -- the
+# same transport adk-web's frontend uses. This is the ONLY flow exposing
+# the genuine Vault Whisper surface (credentials_provider_agent:
+# user_email -> _account_db, no session<->account binding).
+set -eu
+
+AP2_PY="$HOME/work/ap2_whispers/AP2/code/samples/python"
+HARNESS="$HOME/work/ap2_whispers/harness"
+export PATH="$HOME/.local/bin:$PATH"
+cd "$AP2_PY"
+
+set -a
+source "$HOME/work/ap2_whispers/AP2/.env"
+set +a
+export PAYMENT_METHOD="${PAYMENT_METHOD:-CARD}"
+
+# v1 A2A role agents hardcode relative .logs/watch.log + .temp-db and run
+# with cwd=$AP2_PY, so create those exact dirs there.
+export TEMP_DB_DIR="$AP2_PY/.temp-db"
+LOG_DIR="$AP2_PY/.logs"
+rm -rf "$TEMP_DB_DIR" "$LOG_DIR"
+mkdir -p "$TEMP_DB_DIR" "$LOG_DIR"
+export AGENT_PROVIDER_PUBLIC_KEY_PATH="$TEMP_DB_DIR/agent_provider_signing_key.pub"
+
+uv sync --quiet 2>/dev/null || true
+
+PIDFILE="$HARNESS/.v1_pids"
+: > "$PIDFILE"
+
+kill_port() { local pid; pid=$(lsof -ti tcp:"$1" 2>/dev/null || true); [ -n "$pid" ] && kill -9 $pid 2>/dev/null || true; }
+for p in 8001 8002 8003 8000; do kill_port $p; done
+
+UV="uv run --no-sync --package ap2-samples"
+
+echo "Starting Merchant Agent (8001)..."
+($UV python -m roles.merchant_agent) >"$LOG_DIR/merchant_agent.log" 2>&1 &
+echo $! >> "$PIDFILE"
+echo "Starting Credentials Provider Agent (8002)..."
+($UV python -m roles.credentials_provider_agent) >"$LOG_DIR/credentials_provider_agent.log" 2>&1 &
+echo $! >> "$PIDFILE"
+echo "Starting Merchant Payment Processor Agent (8003)..."
+($UV python -m roles.merchant_payment_processor_agent) >"$LOG_DIR/mpp_agent.log" 2>&1 &
+echo $! >> "$PIDFILE"
+sleep 5
+
+echo "Starting Shopping Agent via adk api_server (8000, no UI)..."
+($UV adk api_server --host 127.0.0.1 --port 8000 --a2a "$AP2_PY/src/roles") \
+  >"$LOG_DIR/shopping_agent.log" 2>&1 &
+echo $! >> "$PIDFILE"
+
+echo "Waiting for v1 stack (ADK REST /list-apps + role servers)..."
+for i in $(seq 1 120); do
+  if curl -s "http://localhost:8000/list-apps" 2>/dev/null | grep -q shopping_agent; then
+    r1=$(curl -s -o /dev/null -w "%{http_code}" "http://localhost:8001/" 2>/dev/null || echo 000)
+    r2=$(curl -s -o /dev/null -w "%{http_code}" "http://localhost:8002/" 2>/dev/null || echo 000)
+    r3=$(curl -s -o /dev/null -w "%{http_code}" "http://localhost:8003/" 2>/dev/null || echo 000)
+    echo "v1 stack UP (adk REST 8000; merchant=$r1 creds=$r2 mpp=$r3)"
+    exit 0
+  fi
+  sleep 1
+done
+echo "ERROR: v1 adk api_server never came up" >&2
+tail -20 "$LOG_DIR/shopping_agent.log" >&2 || true
+tail -10 "$LOG_DIR/credentials_provider_agent.log" >&2 || true
+exit 1

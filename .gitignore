@@ -1,0 +1,38 @@
+# Secrets — never commit these
+.env
+.env.*
+!.env.example
+zeroid_oss_client.env
+zeroid_oss_client.env.*
+*.pem
+*.key
+keys/
+.temp-db/
+.logs/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+
+# uv
+.uv-cache/
+uv.lock
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Run-time scratch
+.run.log
+*.tmp

@@ -1,0 +1,85 @@
+# Copyright 2025 Google LLC
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     https://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+"""A2A Agent Executor for the credentials provider agent (Phase 3b-oss).
+
+The three account-resolving tools are wrapped by the standalone OSS-ZeroID
+guard when its enforce flag is set; otherwise the wrapper is transparent
+pass-through and the executor is byte-equivalent to the unmodified AP2
+reference.
+
+  * AP2_ZEROID_OSS_ENFORCE=1  -> real standalone OSS-ZeroID guard (mint via
+                                 POST /oauth2/token client_credentials +
+                                 introspect via POST /oauth2/token/introspect
+                                 against the running public `highflame-ai/
+                                 zeroid` service on :8899).
+  * unset                     -> transparent pass-through == unmodified
+                                 reference (Phase 1 behavior).
+
+Only the OSS guard is wired here. The authn-flavour Phase 3b executor
+(`agent_executor.py.phase3b`) is kept side-by-side, unmodified, for the
+authn-flavour artifacts. The mandate-chain tools (no user_email, never hit
+_account_db by email) are untouched.
+"""
+
+import os
+from typing import Any
+
+from common.base_server_executor import BaseServerExecutor
+from common.system_utils import DEBUG_MODE_INSTRUCTIONS
+
+from . import tools
+from .zeroid_oss_credential import guard_zeroid_oss_tool
+
+
+def _select_guard():
+  """Pick the active guard from env. Default: identity (no-op wrapper)."""
+  # guard_zeroid_oss_tool is internally pass-through when the OSS flag is
+  # unset, so this default is a true no-op == unmodified reference.
+  return guard_zeroid_oss_tool
+
+
+_GUARD = _select_guard()
+
+
+class CredentialsProviderExecutor(BaseServerExecutor):
+  """AgentExecutor for the credentials provider agent."""
+
+  _system_prompt = """
+    You are a credentials provider agent acting as a secure digital wallet.
+    Your job is to manage a user's payment methods and shipping addresses.
+
+    Based on the user's request, identify their intent and select the
+    single correct tool to use. Your only output should be a tool call.
+    Do not engage in conversation.
+
+    %s
+  """ % DEBUG_MODE_INSTRUCTIONS
+
+  def __init__(self, supported_extensions: list[dict[str, Any]] = None):
+    """Initializes the CredentialsProviderExecutor.
+
+    Args:
+        supported_extensions: A list of extension objects supported by the
+          agent.
+    """
+    agent_tools = [
+        _GUARD(tools.handle_create_payment_credential_token),
+        tools.handle_get_payment_method_raw_credentials,
+        _GUARD(tools.handle_get_shipping_address),
+        _GUARD(tools.handle_search_payment_methods),
+        tools.handle_signed_payment_mandate,
+        tools.handle_payment_receipt,
+    ]
+    super().__init__(supported_extensions, agent_tools, self._system_prompt)

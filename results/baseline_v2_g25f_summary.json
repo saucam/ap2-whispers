@@ -1,0 +1,173 @@
+{
+  "flow": "v2",
+  "model": "gemini-2.5-flash",
+  "n": 10,
+  "completed": 0,
+  "stability_pct": 0.0,
+  "stdev": 0.0,
+  "errors": [
+    {
+      "type": "error",
+      "error": "mandate_not_found",
+      "message": "Open checkout mandate placeholder_open_checkout_hash not found"
+    },
+    {
+      "type": "error",
+      "error": "mandate_not_found",
+      "message": "The open checkout mandate required for creating the checkout was not found. This indicates an issue with the session state or the transfer of mandates from the consent agent."
+    },
+    {
+      "type": "error",
+      "error": "verification_failed",
+      "message": "JWT verification failed: Verification failed for all signatures[\"Failed: [InvalidJWSSignature('Verification failed')]\"]"
+    },
+    {
+      "type": "error",
+      "error": "Missing parameter",
+      "message": "open_checkout_mandate_id is required for create_checkout but not found in context or session state. Cannot proceed with purchase flow."
+    },
+    {
+      "type": "error",
+      "error": "mandate_not_found",
+      "message": "Open checkout mandate eyJvY3RhbGciOiJSUzI1NiIsImtpZCI6Im1lcmNoYW50X2tleV9pZCJ9.eyJpc3MiOiJodHRwczovL2RlbW8tY29uc2VudC1hZ2VudC5leGFtcGxlIiwiYXVkIjoibWVyY2hhbnQtdG9vbCIsImlhdCI6MTcwMDAwMDAwMCwiZXhwIjoxODAwMDAwMDAwLCJjbGFpbXMiOnsic2hvcHBpbmdfbWFuZGF0ZSI6eyJsYWJlbCI6Ik1hbmRhdGUgZm9yIFN1cGVyU2hvZSIsImxpbmtlZF9wYXltZW50X21hbmRhdGUiOiJzZGpod2VybWRuZiJ9fSwic2hhcmVhYmxlIjp7InNob3BwaW5nX21hbmRhdGUiOnsiY2xhaW1zIjp7InByaWNlX2NhcCI6MjAwLjAsImxpbmVfaXRlbXMiOlt7ImFjY2VwdGFibGVfaXRlbXMiOlt7ImlkIjoic3VwZXJzaG9lX2xlX2dvbGRfd29tZW5zXzlfMCIsInRpdGxlIjoiU3VwZXJTaG9lIExFIEdvbGQg4oCUIFdvbWVuJ3MgOSJ9XSwicXVhbnRpdHkiOjF9XX19fQ.signature not found"
+    },
+    {
+      "type": "error",
+      "error": "mandate_not_found",
+      "message": "Open checkout mandate some_open_checkout_hash not found"
+    },
+    {
+      "type": "error",
+      "error": "mandate_not_found",
+      "message": "Open checkout mandate open_checkout_mandate_id_from_state not found"
+    },
+    {
+      "type": "error",
+      "error": "mandate_not_found",
+      "message": "Failed to create checkout. The open checkout mandate ID was not found or recognized by the system. Unable to proceed with purchase."
+    },
+    {
+      "type": "error",
+      "error": "mandate_not_found",
+      "message": "Open checkout mandate chk_open_mandate_abc not found"
+    },
+    {
+      "type": "error",
+      "error": "missing_state",
+      "message": "Required session state for 'open_checkout_mandate_id' and 'open_checkout_hash' is not available. Cannot proceed with checkout creation."
+    }
+  ],
+  "mean_elapsed_s": 70.9,
+  "rows": [
+    {
+      "seed": 21,
+      "completed": false,
+      "stage": "error",
+      "error": {
+        "type": "error",
+        "error": "mandate_not_found",
+        "message": "Open checkout mandate placeholder_open_checkout_hash not found"
+      },
+      "elapsed_s": 41.7
+    },
+    {
+      "seed": 22,
+      "completed": false,
+      "stage": "error",
+      "error": {
+        "type": "error",
+        "error": "mandate_not_found",
+        "message": "The open checkout mandate required for creating the checkout was not found. This indicates an issue with the session state or the transfer of mandates from the consent agent."
+      },
+      "elapsed_s": 75.5
+    },
+    {
+      "seed": 23,
+      "completed": false,
+      "stage": "error",
+      "error": {
+        "type": "error",
+        "error": "verification_failed",
+        "message": "JWT verification failed: Verification failed for all signatures[\"Failed: [InvalidJWSSignature('Verification failed')]\"]"
+      },
+      "elapsed_s": 161.3
+    },
+    {
+      "seed": 24,
+      "completed": false,
+      "stage": "error",
+      "error": {
+        "type": "error",
+        "error": "Missing parameter",
+        "message": "open_checkout_mandate_id is required for create_checkout but not found in context or session state. Cannot proceed with purchase flow."
+      },
+      "elapsed_s": 69.7
+    },
+    {
+      "seed": 25,
+      "completed": false,
+      "stage": "error",
+      "error": {
+        "type": "error",
+        "error": "mandate_not_found",
+        "message": "Open checkout mandate eyJvY3RhbGciOiJSUzI1NiIsImtpZCI6Im1lcmNoYW50X2tleV9pZCJ9.eyJpc3MiOiJodHRwczovL2RlbW8tY29uc2VudC1hZ2VudC5leGFtcGxlIiwiYXVkIjoibWVyY2hhbnQtdG9vbCIsImlhdCI6MTcwMDAwMDAwMCwiZXhwIjoxODAwMDAwMDAwLCJjbGFpbXMiOnsic2hvcHBpbmdfbWFuZGF0ZSI6eyJsYWJlbCI6Ik1hbmRhdGUgZm9yIFN1cGVyU2hvZSIsImxpbmtlZF9wYXltZW50X21hbmRhdGUiOiJzZGpod2VybWRuZiJ9fSwic2hhcmVhYmxlIjp7InNob3BwaW5nX21hbmRhdGUiOnsiY2xhaW1zIjp7InByaWNlX2NhcCI6MjAwLjAsImxpbmVfaXRlbXMiOlt7ImFjY2VwdGFibGVfaXRlbXMiOlt7ImlkIjoic3VwZXJzaG9lX2xlX2dvbGRfd29tZW5zXzlfMCIsInRpdGxlIjoiU3VwZXJTaG9lIExFIEdvbGQg4oCUIFdvbWVuJ3MgOSJ9XSwicXVhbnRpdHkiOjF9XX19fQ.signature not found"
+      },
+      "elapsed_s": 55.8
+    },
+    {
+      "seed": 26,
+      "completed": false,
+      "stage": "error",
+      "error": {
+        "type": "error",
+        "error": "mandate_not_found",
+        "message": "Open checkout mandate some_open_checkout_hash not found"
+      },
+      "elapsed_s": 85.7
+    },
+    {
+      "seed": 27,
+      "completed": false,
+      "stage": "error",
+      "error": {
+        "type": "error",
+        "error": "mandate_not_found",
+        "message": "Open checkout mandate open_checkout_mandate_id_from_state not found"
+      },
+      "elapsed_s": 38.7
+    },
+    {
+      "seed": 28,
+      "completed": false,
+      "stage": "error",
+      "error": {
+        "type": "error",
+        "error": "mandate_not_found",
+        "message": "Failed to create checkout. The open checkout mandate ID was not found or recognized by the system. Unable to proceed with purchase."
+      },
+      "elapsed_s": 68.9
+    },
+    {
+      "seed": 29,
+      "completed": false,
+      "stage": "error",
+      "error": {
+        "type": "error",
+        "error": "mandate_not_found",
+        "message": "Open checkout mandate chk_open_mandate_abc not found"
+      },
+      "elapsed_s": 58.1
+    },
+    {
+      "seed": 30,
+      "completed": false,
+      "stage": "error",
+      "error": {
+        "type": "error",
+        "error": "missing_state",
+        "message": "Required session state for 'open_checkout_mandate_id' and 'open_checkout_hash' is not available. Cannot proceed with checkout creation."
+      },
+      "elapsed_s": 53.2
+    }
+  ]
+}

@@ -1,0 +1,82 @@
+{
+  "flow": "v1",
+  "model": "gemini-2.5-flash",
+  "n": 10,
+  "completed": 10,
+  "stability_pct": 100.0,
+  "stdev": 0.0,
+  "errors": [],
+  "mean_elapsed_s": 37.6,
+  "rows": [
+    {
+      "seed": 51,
+      "completed": true,
+      "stage": "receipt",
+      "error": null,
+      "elapsed_s": 33.7
+    },
+    {
+      "seed": 52,
+      "completed": true,
+      "stage": "receipt",
+      "error": null,
+      "elapsed_s": 39.2
+    },
+    {
+      "seed": 53,
+      "completed": true,
+      "stage": "receipt",
+      "error": null,
+      "elapsed_s": 36.6
+    },
+    {
+      "seed": 54,
+      "completed": true,
+      "stage": "receipt",
+      "error": null,
+      "elapsed_s": 37.0
+    },
+    {
+      "seed": 55,
+      "completed": true,
+      "stage": "receipt",
+      "error": null,
+      "elapsed_s": 37.4
+    },
+    {
+      "seed": 56,
+      "completed": true,
+      "stage": "receipt",
+      "error": null,
+      "elapsed_s": 36.0
+    },
+    {
+      "seed": 57,
+      "completed": true,
+      "stage": "receipt",
+      "error": null,
+      "elapsed_s": 38.9
+    },
+    {
+      "seed": 58,
+      "completed": true,
+      "stage": "receipt",
+      "error": null,
+      "elapsed_s": 36.0
+    },
+    {
+      "seed": 59,
+      "completed": true,
+      "stage": "receipt",
+      "error": null,
+      "elapsed_s": 37.2
+    },
+    {
+      "seed": 60,
+      "completed": true,
+      "stage": "receipt",
+      "error": null,
+      "elapsed_s": 44.4
+    }
+  ]
+}
