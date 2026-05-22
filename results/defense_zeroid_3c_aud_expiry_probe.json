@@ -1,0 +1,26 @@
+{
+  "probe_date": "2026-05-21",
+  "zeroid_middleware_results": {
+    "valid_token_aud": "https://highflame.ai",
+    "bad_audience_reject": {
+      "expected_aud": "https://payment-processor.invalid",
+      "actual_aud_in_token": "https://highflame.ai",
+      "result": "REJECTED at entry",
+      "error_message": "JWT aud mismatch: got [https://highflame.ai], expected to contain https://payment-processor.invalid"
+    },
+    "expired_token_reject": {
+      "result": "REJECTED at entry",
+      "error_message_pattern": "JWT expired (exp=<past>, now=<later>, skew_allowed_s=30)"
+    },
+    "signature_tamper_reject": {
+      "result": "REJECTED at entry",
+      "error_message": "JWT signature verification failed"
+    }
+  },
+  "naive_middleware_results": {
+    "any_session_accepted": true,
+    "has_any_scope_returns": true,
+    "comment": "No token / signature / aud / exp / scope concept; substitution still binds the session subject."
+  },
+  "honest_verdict": "ZeroID rejects earlier (at the resource-server boundary). On the AP2 Vault Whisper substrate, the security outcome is the same in both arms because substitution closes the cross-account read structurally, regardless of token plumbing. The substrate is too thin to differentiate Vault on aud / exp / signature. Scope confinement is where the OAuth2 machinery actually pays."
+}

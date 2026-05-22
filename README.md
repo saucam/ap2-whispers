@@ -9,7 +9,8 @@ A measurement-piece companion repo. The paper presents two attacks (*Vault Whisp
 - **20 seeds per attack**, raw and conditional ASR, variance, and a separate **clean no-attack baseline** as a reference-stability control.
 - **Two flow harnesses** (AP2 v1 / human-present, AP2 v2 / human-not-present), each hitting its real surface. v1 is `shopping_agent` plus the A2A `credentials_provider_agent` (Vault surface); v2 is `shopping_agent_v2` plus MCP stdio role servers (Branded surface).
 - **Four escalation probes** (refund-leg whisper, cart-mandate TOCTOU, cross-merchant bleed, payment-mandate scope inflation) measured against the unmodified reference.
-- **Two defense variants** of the same enforcement point — principal-binding at the credentials provider — measured side-by-side: a *real* scoped-credential capability via the public [`highflame-ai/zeroid`](https://github.com/highflame-ai/zeroid) service, and a 3-line `requested == bound-subject` baseline. Both fully reproducible from public sources.
+- **A production OAuth2 resource-server middleware** (validate-at-entry against the public [`highflame-ai/zeroid`](https://github.com/highflame-ai/zeroid) JWKS, substitute the bound principal, drop attacker-controlled `user_email`, scope-confine the write tools) measured side-by-side against a substitute-only baseline (same shape, no token / aud / exp / scope).
+- **A new write-path attack class — Payment Token Whisper** — same root cause as Vault Whisper (no capability scoping on a tool that needs it), aimed at the credentials provider's privileged token-issuance tool. This is the attack class where the OAuth2 machinery's signed `scope` claim does measurable work over the substitute-only shape. Both defenses fully reproducible from public sources.
 
 Trajectories, per-seed scored runs, and aggregated tables are in `results/`.
 
@@ -23,8 +24,10 @@ Trajectories, per-seed scored runs, and aggregated tables are in `results/`.
 | Cart-mandate TOCTOU | 20 | 0.0% | flow doesn't reach signing window |
 | Cross-merchant bleed | 5 | 0.0% | n/a — mandates cryptographically scoped to one merchant (structural) |
 | Payment-mandate scope inflation | 20 | 0.0% | defended 20/20 by AP2's own `AmountRange` constraint |
-| **Vault Whisper, defended by standalone zeroid** | 20 | **0.0%** (0/20 breaches) | 0.0% | 0/12 false-deny on clean baseline |
-| **Vault Whisper, defended by naive `email == bound-subject` check** | 20 | **0.0%** (0/20 breaches) | 0.0% | 0/12 false-deny on clean baseline |
+| **Vault Whisper, defended by OAuth2 middleware (`zeroid_3c`)** | 20 | **0.0%** (0/20 breaches) | 0.0% | 0/10 false-deny on clean baseline |
+| **Vault Whisper, defended by substitute-only middleware (`naive_3c`)** | 20 | **0.0%** (0/20 breaches) | 0.0% | 0/10 false-deny on clean baseline |
+| **Payment Token Whisper (write-path scope-confinement), defended by `zeroid_3c`** | 20 | **0.0%** (0/20 tokens issued) | 0.0% | 0/10 false-deny on clean baseline |
+| **Payment Token Whisper, defended by `naive_3c` (no scope concept)** | 20 | **80.0%** (16/20 runs breached, 18 tokens issued) | 80.0% | n/a — the breach itself |
 
 Full tables: [`results/ASR_TABLE.md`](results/ASR_TABLE.md), [`results/ASR_TABLE_g25f.md`](results/ASR_TABLE_g25f.md), [`results/DEFENSE_TABLE.md`](results/DEFENSE_TABLE.md), [`results/DEFENSE_ZEROID_OSS_TABLE.md`](results/DEFENSE_ZEROID_OSS_TABLE.md). Methodology + caveats: [`results/RESULTS.md`](results/RESULTS.md), [`results/NOTES_DEFENSE.md`](results/NOTES_DEFENSE.md), [`results/NOTES_ZEROID_OSS.md`](results/NOTES_ZEROID_OSS.md).
 
@@ -55,16 +58,25 @@ harness/
     apply_defense.sh / revert_defense.sh
     agent_executor.py.orig / .patched   # Phase 3a AP2 creds-provider patch
     naive_authz.py               # 3-line `email == bound-subject` baseline
-    zeroid_oss_credential.py     # Phase 3b-oss — real OSS-zeroid (https://github.com/highflame-ai/zeroid) HTTP integration
+    zeroid_oss_credential.py     # Phase 3b-oss — per-call introspect retrofit (kept for history)
     zeroid_oss_bootstrap.py      # one-shot: register identity + OAuth client against standalone zeroid
     agent_executor.py.phase3b_oss
     apply_defense_oss.sh         # idempotent, reversible
     defense_runner_oss.py        # Phase 3b-oss runner
+    zeroid_middleware_oss.py     # Phase 3c — production OAuth2 resource-server middleware (validate-at-entry, JWKS verify, scope-confine)
+    naive_middleware.py          # Phase 3c — substitute-only baseline (same shape, no token/aud/exp/scope)
+    payloads_scope.py            # Phase 3c — Payment Token Whisper (write-path scope-confinement attack)
+    scorer_3c.py                 # Phase 3c — defense-aware scorer for token-issuance breach
+    agent_executor.py.phase3c    # Phase 3c — env-selected guard (AP2_DEFENSE_MODE)
+    apply_defense_3c.sh          # Phase 3c — idempotent, reversible
+    defense_runner_3c.py         # Phase 3c — mode-driven runner
 results/
-  ASR_TABLE.md, ASR_TABLE_g25f.md, DEFENSE_TABLE.md, DEFENSE_ZEROID_OSS_TABLE.md
-  RESULTS.md, RESULTS_g25f.md, NOTES_DEFENSE.md, NOTES_ZEROID_OSS.md
+  ASR_TABLE.md, ASR_TABLE_g25f.md, DEFENSE_TABLE.md, DEFENSE_ZEROID_OSS_TABLE.md, DEFENSE_ZEROID_3C_TABLE.md
+  RESULTS.md, RESULTS_g25f.md, NOTES_DEFENSE.md, NOTES_ZEROID_OSS.md, NOTES_ZEROID_OSS_3C.md
   *_summary.json, *_runs.jsonl       # per-attack aggregates + per-seed
-  trajectories/*.jsonl                # raw A2A trajectories (~230 files)
+  defense_zeroid_3c_credentials_provider.log, defense_naive_3c_credentials_provider.log
+  defense_zeroid_3c_aud_expiry_probe.json
+  trajectories/*.jsonl                # raw A2A trajectories (~330 files)
 ```
 
 ## Quick-start (full repro of the defense leg)
@@ -100,14 +112,23 @@ curl http://localhost:8899/health   # {"status":"healthy","service":"zeroid",...
 python3 ap2-whispers/harness/defense/zeroid_oss_bootstrap.py
 # writes ./zeroid_oss_client.env (or set AP2_ZEROID_OSS_CLIENT_ENV)
 
-# 5. Apply the defense to the v1 creds-provider, run defended Vault N=20 + clean baseline.
-bash ap2-whispers/harness/defense/apply_defense_oss.sh
-(cd AP2/code/samples/python && uv run python harness/defense/defense_runner_oss.py vault 20 1)
-(cd AP2/code/samples/python && uv run python harness/defense/defense_runner_oss.py baseline 12 1)
-# -> results/defense_zeroid_oss_vault_runs.jsonl + defense_zeroid_oss_baseline_runs.jsonl
+# 5. Apply the Phase 3c production middleware (validate-at-entry, substitute, scope-confine)
+#    and run the full Phase 3c suite: Vault sanity (substrate-too-thin) + Payment Token Whisper
+#    + clean baseline, on both arms (zeroid_3c, naive_3c).
+bash ap2-whispers/harness/defense/apply_defense_3c.sh zeroid_3c
+(cd AP2/code/samples/python && \
+   uv run python harness/defense/defense_runner_3c.py vault 20 1 && \
+   uv run python harness/defense/defense_runner_3c.py scope 20 1 && \
+   uv run python harness/defense/defense_runner_3c.py baseline 10 1)
+bash ap2-whispers/harness/defense/apply_defense_3c.sh naive_3c
+(cd AP2/code/samples/python && \
+   uv run python harness/defense/defense_runner_3c.py vault 20 1 && \
+   uv run python harness/defense/defense_runner_3c.py scope 20 1 && \
+   uv run python harness/defense/defense_runner_3c.py baseline 10 1)
+# -> results/defense_{zeroid,naive}_3c_3c_{vault,scope,baseline}_*.{json,jsonl}
 ```
 
-Detailed reader notes: [`results/NOTES_ZEROID_OSS.md`](results/NOTES_ZEROID_OSS.md). The `naive-authz` variant follows the same pattern with `harness/defense/naive_authz.py`.
+Detailed Phase 3c reader notes: [`results/NOTES_ZEROID_OSS_3C.md`](results/NOTES_ZEROID_OSS_3C.md) (production middleware design + scope→tool mapping + full repro). For the earlier per-call introspect retrofit (kept for history), see [`results/NOTES_ZEROID_OSS.md`](results/NOTES_ZEROID_OSS.md) and `harness/defense/zeroid_oss_credential.py`.
 
 ## Companion write-up
 

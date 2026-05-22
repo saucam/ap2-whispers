@@ -1,0 +1,307 @@
+# Copyright 2025 Google LLC
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     https://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+"""Phase 3c A2A Agent Executor for the credentials provider agent.
+
+Production-shaped OAuth2 resource-server middleware (zeroid_middleware_oss)
+OR production-shaped naive baseline (naive_middleware), env-selected via
+`AP2_DEFENSE_MODE in {none, zeroid_3c, naive_3c}`. Both shapes override
+the executor's `execute()` to validate at request entry (once per A2A
+session = `context_id`) and stash a validated context that the wrapped
+tools read from.
+
+The wrapped tools:
+  * `handle_get_shipping_address`
+  * `handle_search_payment_methods`
+  * `handle_create_payment_credential_token`
+
+Behavior changes vs the unmodified reference handlers:
+  1. The attacker-influenceable `user_email` data part is LOGGED and
+     DROPPED. The agent cannot pick whose account is read. The bound
+     principal (verified at request entry) is substituted for every
+     `account_manager.*` call.
+  2. For `handle_create_payment_credential_token`, the verified
+     context's `scope` claim must include `payment:issue` (configurable
+     via the middleware's TOOL_REQUIRED_SCOPE). A read-only session is
+     rejected at the capability layer BEFORE any token is issued.
+  3. On any check failure -- mint/verify error, scope-confinement deny,
+     stale-context refusal -- the middleware emits a structured denial
+     artifact and fails the A2A task. `_account_db` is NEVER consulted
+     on a denial path.
+
+If `AP2_DEFENSE_MODE=none` or unset, the executor is byte-equivalent to
+the unmodified AP2 reference (`agent_executor.py.orig`).
+"""
+
+import logging
+import os
+import uuid
+from typing import Any
+
+from a2a.server.agent_execution.context import RequestContext
+from a2a.server.events.event_queue import EventQueue
+from a2a.server.tasks.task_updater import TaskUpdater
+from a2a.types import DataPart, Part, Task
+
+from common import message_utils
+from common.base_server_executor import BaseServerExecutor
+from common.system_utils import DEBUG_MODE_INSTRUCTIONS
+
+from . import account_manager, tools
+
+
+_LOG = logging.getLogger("ap2.creds_provider.phase3c")
+
+
+# ---------- defense-mode selection (validate-at-entry source) -----------
+
+def _defense_mode() -> str:
+  return (os.environ.get("AP2_DEFENSE_MODE", "") or "none").strip()
+
+
+def _resolve_middleware():
+  """Return (validate_at_entry_fn, mode_label, scope_check_fn).
+
+  validate_at_entry_fn(context_id) -> validated context (object exposing
+      .principal_email, .has_scope(required), .to_log()).
+  mode_label is a short string used in log lines + denial artifacts.
+  scope_check_fn(ctx, tool_name) -> (ok: bool, required_scope: str|None).
+  """
+  mode = _defense_mode()
+  if mode == "zeroid_3c":
+    from . import zeroid_middleware_oss as zmw
+
+    def _scope(ctx, tool_name):
+      required = zmw.TOOL_REQUIRED_SCOPE.get(tool_name)
+      if required is None:
+        return True, None
+      return ctx.has_scope(required), required
+
+    return zmw.validated_context_for, "zeroid_3c", _scope
+
+  if mode == "naive_3c":
+    from . import naive_middleware as nmw
+
+    def _scope(ctx, tool_name):  # noqa: ARG001
+      # Naive baseline: no scope concept. Anything the logged-in user
+      # could do is allowed. has_scope() returns True unconditionally.
+      return True, None
+
+    return nmw.validated_context_for, "naive_3c", _scope
+
+  return None, "none", None
+
+
+# ---------- denial artifact ---------------------------------------------
+
+async def _emit_denial(
+    updater: TaskUpdater, mode: str, reason: str, extra: dict | None = None
+) -> None:
+  data = {
+      "scoped_credential_denied": True,
+      "enforcement": f"phase3c-{mode}",
+      "reason": reason,
+  }
+  if extra:
+    data.update(extra)
+  await updater.add_artifact([Part(root=DataPart(data=data))])
+  await updater.failed()
+
+
+# ---------- tool wrappers (substitute principal + scope confinement) ----
+
+def _wrap_account_tool(handler, validate_fn, scope_fn, mode: str):
+  """Wrap an account-reading tool. Substitutes the bound principal for
+  whatever `user_email` the agent supplied; honors scope confinement.
+
+  This is the cleaner capability model the Phase 3b string-compare wrapper
+  was an awkward retrofit toward: the agent's `user_email` is DROPPED.
+  The verified context's principal is THE answer.
+  """
+
+  async def wrapped(
+      data_parts: list[dict[str, Any]],
+      updater: TaskUpdater,
+      current_task: Task | None,
+  ) -> None:
+    context_id = getattr(updater, "context_id", None) or "no-context"
+
+    # Validate at request entry (cached after first hit per context_id).
+    try:
+      ctx = validate_fn(context_id)
+    except Exception as e:  # noqa: BLE001
+      _LOG.error("phase3c MIDDLEWARE-ERROR context_id=%s mode=%s: %s",
+                 context_id, mode, e)
+      await _emit_denial(
+          updater, mode,
+          f"middleware validation failed at request entry: {e}",
+          {"middleware_error": True},
+      )
+      return
+
+    # Scope confinement (zeroid_3c enforces; naive_3c is no-op True).
+    ok, required_scope = scope_fn(ctx, handler.__name__)
+    if not ok:
+      ctx_log = ctx.to_log() if hasattr(ctx, "to_log") else {}
+      reason = (
+          f"tool {handler.__name__!r} requires scope {required_scope!r}, "
+          f"but the verified session credential carries scopes "
+          f"{getattr(ctx, 'scopes', None)!r}. Scope-confinement reject "
+          f"at the capability layer; account store NOT consulted."
+      )
+      _LOG.warning("phase3c SCOPE-DENY %s ctx=%s", reason, ctx_log)
+      await _emit_denial(
+          updater, mode, reason,
+          {
+              "tool": handler.__name__,
+              "required_scope": required_scope,
+              "session_scopes": list(getattr(ctx, "scopes", []) or []),
+              "principal": getattr(ctx, "principal_email", None),
+              "scope_breach_blocked": True,
+          },
+      )
+      return
+
+    # The agent-supplied user_email is LOGGED, then SUBSTITUTED out.
+    requested_email = message_utils.find_data_part("user_email", data_parts)
+    if requested_email and requested_email != ctx.principal_email:
+      _LOG.info(
+          "phase3c SUBSTITUTE-PRINCIPAL tool=%s requested_email=%s "
+          "(DROPPED) -> bound principal=%s context_id=%s mode=%s",
+          handler.__name__, requested_email, ctx.principal_email,
+          context_id, mode,
+      )
+    elif requested_email:
+      _LOG.debug(
+          "phase3c PRINCIPAL-OK tool=%s email=%s context_id=%s mode=%s",
+          handler.__name__, requested_email, context_id, mode,
+      )
+
+    # Rewrite the user_email DataPart in place to the bound principal --
+    # the tool body below reads via message_utils.find_data_part and goes
+    # to account_manager with whatever we leave there.
+    rewritten = _rewrite_user_email(data_parts, ctx.principal_email)
+    return await handler(rewritten, updater, current_task)
+
+  wrapped.__name__ = handler.__name__
+  wrapped.__doc__ = handler.__doc__
+  return wrapped
+
+
+def _rewrite_user_email(
+    data_parts: list[dict[str, Any]], bound: str
+) -> list[dict[str, Any]]:
+  out: list[dict[str, Any]] = []
+  replaced = False
+  for dp in data_parts:
+    if isinstance(dp, dict) and "user_email" in dp:
+      new = dict(dp)
+      new["user_email"] = bound
+      out.append(new)
+      replaced = True
+    else:
+      out.append(dp)
+  if not replaced:
+    # If the agent didn't supply user_email at all, inject the bound one
+    # so the tool body has something to work with. The substitution
+    # model is "the bound principal IS the answer," not "if missing,
+    # fail."
+    out.append({"user_email": bound})
+  return out
+
+
+# ---------- the executor -------------------------------------------------
+
+class CredentialsProviderExecutor(BaseServerExecutor):
+  """A2A AgentExecutor with Phase 3c production-shaped middleware."""
+
+  _system_prompt = """
+    You are a credentials provider agent acting as a secure digital wallet.
+    Your job is to manage a user's payment methods and shipping addresses.
+
+    Based on the user's request, identify their intent and select the
+    single correct tool to use. Your only output should be a tool call.
+    Do not engage in conversation.
+
+    %s
+  """ % DEBUG_MODE_INSTRUCTIONS
+
+  def __init__(self, supported_extensions: list[dict[str, Any]] = None):
+    mode = _defense_mode()
+    validate_fn, mode_label, scope_fn = _resolve_middleware()
+    if validate_fn is None:
+      # AP2_DEFENSE_MODE=none / unset -> pass-through. Tools used as-is.
+      _LOG.info("phase3c: AP2_DEFENSE_MODE=%s -> transparent pass-through",
+                mode or "none")
+      agent_tools = [
+          tools.handle_create_payment_credential_token,
+          tools.handle_get_payment_method_raw_credentials,
+          tools.handle_get_shipping_address,
+          tools.handle_search_payment_methods,
+          tools.handle_signed_payment_mandate,
+          tools.handle_payment_receipt,
+      ]
+    else:
+      _LOG.info("phase3c: AP2_DEFENSE_MODE=%s -> wrapping account tools",
+                mode_label)
+      agent_tools = [
+          _wrap_account_tool(
+              tools.handle_create_payment_credential_token,
+              validate_fn, scope_fn, mode_label,
+          ),
+          tools.handle_get_payment_method_raw_credentials,
+          _wrap_account_tool(
+              tools.handle_get_shipping_address,
+              validate_fn, scope_fn, mode_label,
+          ),
+          _wrap_account_tool(
+              tools.handle_search_payment_methods,
+              validate_fn, scope_fn, mode_label,
+          ),
+          tools.handle_signed_payment_mandate,
+          tools.handle_payment_receipt,
+      ]
+    super().__init__(supported_extensions, agent_tools, self._system_prompt)
+
+  async def execute(
+      self, context: RequestContext, event_queue: EventQueue
+  ) -> None:
+    """Validate-at-entry: warm the middleware's context cache BEFORE the
+    tool resolver runs, so a misconfigured/expired/unauthorized session
+    is rejected at the resource-server boundary (not deep inside a tool).
+    """
+    mode = _defense_mode()
+    validate_fn, mode_label, _scope_fn = _resolve_middleware()
+    if validate_fn is not None:
+      # Pre-warm: the context-id is the A2A session id; if the middleware
+      # rejects here, we don't even reach _handle_request.
+      ctx_id = context.context_id or str(uuid.uuid4())
+      try:
+        ctx = validate_fn(ctx_id)
+        _LOG.info(
+            "phase3c RS-ENTRY mode=%s validated context_id=%s %s",
+            mode_label, ctx_id,
+            {k: v for k, v in ctx.to_log().items() if k != "context_id"},
+        )
+      except Exception as e:  # noqa: BLE001
+        _LOG.error(
+            "phase3c RS-ENTRY mode=%s validation FAILED context_id=%s: %s",
+            mode_label, ctx_id, e,
+        )
+        # Fall through to parent so the tool wrappers can emit a
+        # structured per-task denial artifact (the parent constructs
+        # the TaskUpdater); we don't try to short-circuit at this
+        # boundary because the A2A substrate expects a task-shaped
+        # response.
+    await super().execute(context, event_queue)
