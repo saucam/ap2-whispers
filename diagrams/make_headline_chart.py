@@ -142,6 +142,9 @@ footer = (
 fig.text(0.5, -0.05, footer, ha="center", fontsize=8.6, color="#444", style="italic")
 
 plt.tight_layout(rect=[0, 0.02, 1, 1])
-out = HERE / "headline.png"
-plt.savefig(out, dpi=180, bbox_inches="tight", facecolor="white")
-print(f"saved {out}")
+out_png = HERE / "headline.png"
+out_svg = HERE / "headline.svg"
+plt.savefig(out_png, dpi=180, bbox_inches="tight", facecolor="white")
+plt.savefig(out_svg, bbox_inches="tight", facecolor="white")
+print(f"saved {out_png}")
+print(f"saved {out_svg}")
